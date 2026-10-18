@@ -1,0 +1,21 @@
+# JK Montessori School ERP — Apache Rewrite Configuration
+# Target: XAMPP Apache Module mod_rewrite
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block access to hidden files (.env, .git, etc.)
+    RewriteRule ^\..* - [F,L]
+
+    # Handle Front Controller
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)$ index.php [QSA,L]
+</IfModule>
+
+# Security Headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+</IfModule>

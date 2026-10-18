@@ -1,0 +1,6 @@
+{
+  "name": "JK Montessori School ERP",
+  "description": "Professional School Management ERP for JK Montessori School, Ghughli, Maharajganj. Developed by Bhaskar Gautam.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
