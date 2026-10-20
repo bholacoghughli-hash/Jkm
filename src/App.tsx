@@ -23,7 +23,9 @@ const MainLayout: React.FC = () => {
 
   React.useEffect(() => {
     const main = document.querySelector('main');
-    if (main) main.scrollTop = 0;
+    if (main) {
+      main.scrollTop = 0;
+    }
   }, [activeModule]);
 
   return (
@@ -37,21 +39,15 @@ const MainLayout: React.FC = () => {
         <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 space-y-6">
           {activeModule === 'dashboard' ? (
             <div className="space-y-6 max-w-7xl mx-auto">
-              {/* School Hero & Sample Data Disclaimer */}
               <HeroBanner />
-
-              {/* 6 Core Dashboard Metric Cards */}
               <StatCardsSection />
 
-              {/* Main 2-Column Responsive Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Left 7 Columns: Attendance Wings & Recent Admissions */}
                 <div className="lg:col-span-7 space-y-6">
                   <AttendanceOverview />
                   <RecentAdmissions />
                 </div>
 
-                {/* Right 5 Columns: Fee Summary, Upcoming Events, Audit Activities */}
                 <div className="lg:col-span-5 space-y-6">
                   <FeeSummaryCard />
                   <UpcomingEvents />
@@ -78,11 +74,16 @@ const MainLayout: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
-  const { viewMode } = useApp();
+  const { viewMode, currentUser } = useApp();
+
+  // Never render the ERP interface without an authenticated user.
+  // Backend APIs must still enforce authentication and permissions.
+  const canViewERP = viewMode !== 'website' && currentUser !== null;
 
   return (
     <>
-      {viewMode === 'website' ? <SchoolWebsite /> : <MainLayout />}
+      {canViewERP ? <MainLayout /> : <SchoolWebsite />}
+
       <SystemInfoModal />
       <LoginModal />
     </>
