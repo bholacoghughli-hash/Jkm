@@ -1,14 +1,19 @@
 /**
  * API Client for JK Montessori School ERP
- * Developed by Bhaskar Gautam
- * 
+ *
  * Rules:
- * 1. Always uses credentials: "include" for secure HTTP cookies.
- * 2. Attaches X-CSRF-Token for state-changing operations.
- * 3. Never stores secrets or session tokens in localStorage.
+ * 1. Uses secure HTTP cookies for PHP sessions.
+ * 2. Sends CSRF tokens with state-changing requests.
+ * 3. Never stores session tokens in localStorage.
+ * 4. Requires an explicit API base URL.
  */
 
-let apiBaseUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost/jkmontessori_erp/backend/public';
+const configuredApiBaseUrl = (import.meta as any).env?.VITE_API_BASE_URL;
+
+let apiBaseUrl: string = typeof configuredApiBaseUrl === "string"
+  ? configuredApiBaseUrl.replace(/\/+$/, "")
+  : "";
+
 let currentCsrfToken: string | null = null;
 
 export function getApiBaseUrl(): string {
@@ -16,7 +21,7 @@ export function getApiBaseUrl(): string {
 }
 
 export function setApiBaseUrl(url: string): void {
-  apiBaseUrl = url.replace(/\/+$/, '');
+  apiBaseUrl = url.trim().replace(/\/+$/, "");
 }
 
 export function getCsrfToken(): string | null {
@@ -31,65 +36,141 @@ export interface ApiFetchOptions extends RequestInit {
   skipCsrf?: boolean;
 }
 
-/**
- * Perform an HTTP request to the PHP backend
- */
-export async function apiFetch<T = any>(endpoint: string, options: ApiFetchOptions = {}): Promise<{
+export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
   code?: string;
   status: number;
-}> {
-  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  const url = `${apiBaseUrl}${cleanEndpoint}`;
+}
 
-  const headers = new Headers(options.headers || {});
-  headers.set('Accept', 'application/json');
+export async function apiFetch<T = any>(
+  endpoint: string,
+  options: ApiFetchOptions = {}
+): Promise<ApiResponse<T>> {
+  const method = (options.method || "GET").toUpperCase();
 
-  if (options.body && typeof options.body === 'string' && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
+  // Do not accidentally send requests to the frontend hosting URL.
+  if (!apiBaseUrl) {
+    return {
+      success: false,
+      error:
+        "API base URL is not configured. Set VITE_API_BASE_URL to your PHP backend URL.",
+      code: "API_BASE_URL_MISSING",
+      status: 0,
+    };
   }
 
-  // Attach CSRF Token for mutating requests
-  const method = (options.method || 'GET').toUpperCase();
-  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method) && !options.skipCsrf && currentCsrfToken) {
-    headers.set('X-CSRF-Token', currentCsrfToken);
+  // Only allow HTTP(S) endpoints on the configured backend origin.
+  let baseUrl: URL;
+
+  try {
+    baseUrl = new URL(apiBaseUrl);
+  } catch {
+    return {
+      success: false,
+      error: "The configured API base URL is invalid.",
+      code: "INVALID_API_BASE_URL",
+      status: 0,
+    };
+  }
+
+  if (
+    !["http:", "https:"].includes(baseUrl.protocol) ||
+    (import.meta.env.PROD && baseUrl.protocol !== "https:")
+  ) {
+    return {
+      success: false,
+      error: "Production API must use a valid HTTPS URL.",
+      code: "INSECURE_API_BASE_URL",
+      status: 0,
+    };
+  }
+
+  const cleanEndpoint = endpoint.replace(/^\/+/, "");
+
+  // Reject absolute URLs and path traversal.
+  if (
+    !cleanEndpoint ||
+    /^[a-z][a-z\d+.-]*:/i.test(cleanEndpoint) ||
+    cleanEndpoint.startsWith("//") ||
+    cleanEndpoint.split("/").some((part) => part === "..")
+  ) {
+    return {
+      success: false,
+      error: "Invalid API endpoint.",
+      code: "INVALID_ENDPOINT",
+      status: 0,
+    };
+  }
+
+  const url = `${apiBaseUrl}/${cleanEndpoint}`;
+
+  const headers = new Headers(options.headers || {});
+  headers.set("Accept", "application/json");
+
+  if (
+    options.body &&
+    typeof options.body === "string" &&
+    !headers.has("Content-Type")
+  ) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const isMutation = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+
+  if (isMutation && !options.skipCsrf) {
+    if (!currentCsrfToken) {
+      return {
+        success: false,
+        error:
+          "CSRF token is missing. Obtain a token from the backend before submitting this request.",
+        code: "CSRF_TOKEN_MISSING",
+        status: 0,
+      };
+    }
+
+    headers.set("X-CSRF-Token", currentCsrfToken);
   }
 
   try {
     const response = await fetch(url, {
       ...options,
+      method,
       headers,
-      credentials: 'include', // Essential for PHP session cookies
+      credentials: "include",
+      redirect: "error",
     });
 
-    const isJson = response.headers.get('content-type')?.includes('application/json');
-    const json = isJson ? await response.json() : null;
+    const contentType = response.headers.get("content-type") || "";
+    const json = contentType.includes("application/json")
+      ? await response.json()
+      : null;
 
-    if (json?.csrf_token) {
+    if (json?.csrf_token && typeof json.csrf_token === "string") {
       setCsrfToken(json.csrf_token);
     }
 
     if (!response.ok) {
       return {
         success: false,
-        error: json?.error || `Request failed with status ${response.status}`,
-        code: json?.code || 'HTTP_ERROR',
+        error: json?.error || `Request failed (${response.status}).`,
+        code: json?.code || "HTTP_ERROR",
         status: response.status,
       };
     }
 
     return {
       success: true,
-      data: json,
+      data: json as T,
       status: response.status,
     };
-  } catch (err: any) {
+  } catch {
     return {
       success: false,
-      error: err.message || 'Network error: could not connect to PHP server. Verify XAMPP is running.',
-      code: 'NETWORK_ERROR',
+      error:
+        "Could not connect to the PHP backend. Check the backend URL, server status, HTTPS, and CORS/session-cookie settings.",
+      code: "NETWORK_ERROR",
       status: 0,
     };
   }
